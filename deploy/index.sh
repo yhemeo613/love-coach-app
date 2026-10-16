@@ -42,7 +42,7 @@ echo "目标: $USER_NAME@$HOST:$PORT  目录: $APP_DIR"
 
 SSH_OPTS=(-i "$KEY" -p "$PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15)
 if ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST" \
-     "APP_DIR='$APP_DIR' MAX_MINUTES='$MAX_MINUTES' RAG_INDEX_BATCH='$RAG_INDEX_BATCH' bash -s" \
+     "cat > /tmp/rag-index-remote.sh && APP_DIR='$APP_DIR' MAX_MINUTES='$MAX_MINUTES' RAG_INDEX_BATCH='$RAG_INDEX_BATCH' bash /tmp/rag-index-remote.sh" \
      < scripts/rag-index-remote.sh; then
   INDEX_EXIT=0
 else

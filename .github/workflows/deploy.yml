@@ -50,7 +50,10 @@ jobs:
 
       - name: 执行部署
         run: |
-          ssh deploy-target "APP_DIR='${{ vars.APP_DIR || '/opt/apps/love-coach' }}' bash -s" \
+          # 脚本先落盘再执行：`bash -s` 的 stdin 会被脚本内部命令（docker compose 等）吞掉，
+          # 导致脚本中途被静默截断
+          ssh deploy-target "cat > /tmp/deploy-remote.sh && chmod +x /tmp/deploy-remote.sh && \
+            APP_DIR='${{ vars.APP_DIR || '/opt/apps/love-coach' }}' bash /tmp/deploy-remote.sh" \
             < scripts/deploy-remote.sh 2>&1 | tee /tmp/deploy-output.log
 
       - name: 采集部署摘要

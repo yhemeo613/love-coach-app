@@ -73,7 +73,10 @@ if ! ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST" 'echo "  已连接: $(hostname) | $
 fi
 
 step "2/5 服务器端部署（明细见下方分段日志）"
-if ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST" "APP_DIR='$APP_DIR' bash -s" < scripts/deploy-remote.sh; then
+# 注意：必须先把脚本落到服务器文件再执行。
+# 直接 `bash -s < script` 会让脚本从 stdin 读取，脚本内部的命令（docker compose 等）
+# 会吞掉剩余脚本内容，导致中途静默截断。
+if ssh "${SSH_OPTS[@]}" "$USER_NAME@$HOST"      "cat > /tmp/deploy-remote.sh && chmod +x /tmp/deploy-remote.sh && APP_DIR='$APP_DIR' bash /tmp/deploy-remote.sh"      < scripts/deploy-remote.sh; then
   DEPLOY_EXIT=0
 else
   DEPLOY_EXIT=$?

@@ -57,10 +57,12 @@ jobs:
 
       - name: 执行索引
         run: |
-          ssh deploy-target "APP_DIR='${{ vars.APP_DIR || '/opt/apps/love-coach' }}' \
+          # 同 CD：脚本先落盘再执行，避免 stdin 被内部命令吞掉
+          ssh deploy-target "cat > /tmp/rag-index-remote.sh && chmod +x /tmp/rag-index-remote.sh && \
+            APP_DIR='${{ vars.APP_DIR || '/opt/apps/love-coach' }}' \
             MAX_MINUTES='${{ inputs.max_minutes || '90' }}' \
             RAG_INDEX_BATCH='${{ inputs.batch || '48' }}' \
-            bash -s" < scripts/rag-index-remote.sh 2>&1 | tee /tmp/index-output.log
+            bash /tmp/rag-index-remote.sh" < scripts/rag-index-remote.sh 2>&1 | tee /tmp/index-output.log
 
       - name: 采集索引报告
         if: always()
