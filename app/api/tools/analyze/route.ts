@@ -51,7 +51,86 @@ const SYSTEM = `你是恋爱教练的分析模块。用户会粘贴一段真实�
 - 只输出 JSON，不要任何 Markdown 代码块或解释文字。
 - evidence 必须引用聊天记录里的原话片段（可截断），不要编造。
 - nextActions 最多 4 条，必须具体、可执行、可拒绝。
-- 若记录里出现持续的贬低、拉扯、自我怀疑迹象，在 risks 中明确指出，并在 summary 里建议切换到「守护」场景。`;
+- 若记录里出现持续的贬低、拉扯、自我怀疑迹象，在 risks 中明确指出，并在 summary 里建议切换到「守护」场景。
+
+输出格式（字段名必须与下面完全一致，不要自创字段名）：
+{
+  "stage": "S0~S10 之一，或 free",
+  "stageName": "该阶段的中文名，如「聊天与话题」",
+  "summary": "两三句总体判断，直指核心问题",
+  "signals": [
+    { "label": "信号名，如「主动开话题」", "reading": "positive 或 neutral 或 negative", "evidence": "聊天记录里的原话片段" }
+  ],
+  "risks": ["风险提示，如越界推进、讨好、操控倾向"],
+  "nextActions": [
+    { "action": "明天就能做的具体动作", "sample": "可直接照抄的一句话（没有就省略该字段）" }
+  ],
+  "boundaryNote": "一句边界提醒：知情、可撤回、可拒绝"
+}
+注意：signals 最多 6 条、risks 最多 4 条、nextActions 最多 4 条；reading 只能取 positive / neutral / negative 三个英文值。`;
+
+/**
+ * 容错归一：模型偶尔会自创字段名（stageLabel / type）或用中文枚举值（低兴趣 / 正面）。
+ * 这里做最小映射，避免整次分析因字段命名差异而失败；结构仍由 zod 严格校验。
+ */
+function normalizeReport(input: unknown): unknown {
+  if (!input || typeof input !== "object") return input;
+  const raw = input as Record<string, unknown>;
+  const pick = (...keys: string[]): unknown => {
+    for (const key of keys) if (raw[key] !== undefined) return raw[key];
+    return undefined;
+  };
+
+  const readingMap: Record<string, "positive" | "neutral" | "negative"> = {
+    positive: "positive",
+    neutral: "neutral",
+    negative: "negative",
+    正面: "positive",
+    积极: "positive",
+    中性: "neutral",
+    负面: "negative",
+    消极: "negative",
+    高兴趣: "positive",
+    低兴趣: "negative",
+  };
+  const mapReading = (value: unknown): "positive" | "neutral" | "negative" =>
+    readingMap[String(value ?? "").trim().toLowerCase()] ?? "neutral";
+
+  const signalsRaw = pick("signals", "signalsList");
+  const signals = Array.isArray(signalsRaw)
+    ? signalsRaw.slice(0, 6).map((signal) => {
+        const item = (signal ?? {}) as Record<string, unknown>;
+        return {
+          label: String(item.label ?? item.type ?? item.name ?? "信号"),
+          reading: mapReading(item.reading ?? item.level ?? item.interest),
+          evidence: String(item.evidence ?? item.quote ?? ""),
+        };
+      })
+    : [];
+
+  const actionsRaw = pick("nextActions", "actions");
+  const nextActions = Array.isArray(actionsRaw)
+    ? actionsRaw.slice(0, 4).map((action) => {
+        const item = (action ?? {}) as Record<string, unknown>;
+        const sample = item.sample ?? item.script ?? item["话术"];
+        return {
+          action: String(item.action ?? item["动作"] ?? item.text ?? ""),
+          ...(sample ? { sample: String(sample) } : {}),
+        };
+      })
+    : [];
+
+  const risksRaw = pick("risks", "warnings");
+  return {
+    stage: String(pick("stage", "stageCode") ?? "free"),
+    stageName: String(pick("stageName", "stageLabel", "stageTitle") ?? ""),
+    summary: String(pick("summary", "overall", "judgement") ?? ""),
+    signals,
+    risks: Array.isArray(risksRaw) ? risksRaw.slice(0, 4).map((risk) => String(risk)) : [],
+    nextActions,
+    boundaryNote: String(pick("boundaryNote", "boundary", "note") ?? "知情、可撤回、可拒绝。"),
+  };
+}
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -107,7 +186,7 @@ export async function POST(req: Request) {
         { status: 502 },
       );
     }
-    const parsed = ReportSchema.safeParse(parsedJson);
+    const parsed = ReportSchema.safeParse(normalizeReport(parsedJson));
 
     if (!parsed.success) {
       return Response.json(
