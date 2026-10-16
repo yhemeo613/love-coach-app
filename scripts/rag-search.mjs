@@ -19,7 +19,11 @@ import { dedupeNear, lexicalRank, rrfFuse } from "../lib/rag/ranking.ts";
 const args = process.argv.slice(2);
 const bookIndex = args.indexOf("--book");
 const bookFilter = bookIndex >= 0 ? args[bookIndex + 1] : undefined;
-const query = args.filter((_, i) => i !== bookIndex && i !== bookIndex + 1).join(" ").trim();
+// 注意：bookIndex 为 -1 时不能按索引过滤，否则会把第一个参数（查询词）也丢掉
+const query = args
+  .filter((_, i) => bookIndex < 0 || (i !== bookIndex && i !== bookIndex + 1))
+  .join(" ")
+  .trim();
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const EMBED_URL = (process.env.EMBED_URL || "").replace(/\/+$/, "");
