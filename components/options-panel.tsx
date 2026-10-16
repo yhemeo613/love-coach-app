@@ -92,7 +92,9 @@ export function OptionsPanel({
       </button>
 
       {open ? (
-        <div className="scroll-thin absolute right-0 z-30 mt-2 max-h-[calc(100vh-9rem)] w-[360px] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-lg">
+        // 说明：聊天页最外层是 h-screen + overflow-hidden，面板超出的部分会被裁掉，
+        // 因此这里按「视口高度 - 顶栏 - 底部输入区」限高，并保证宽度不超出视口
+        <div className="scroll-thin absolute right-0 z-30 mt-2 max-h-[calc(100vh-13rem)] w-[min(352px,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-lg">
           {loading ? (
             <p className="flex items-center gap-2 text-[12.5px] text-[var(--muted-foreground)]">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -105,7 +107,8 @@ export function OptionsPanel({
               <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
               模型
             </p>
-            <div className="mt-2 space-y-1.5">
+            {/* 模型多时列表独立滚动，避免把面板撑高到超出视口 */}
+            <div className="scroll-thin mt-2 max-h-[28vh] space-y-1.5 overflow-y-auto pr-0.5">
               {(data?.models || [{ id: "deepseek-flash", label: "DeepSeek Flash", description: "" }]).map(
                 (model) => (
                   <button
