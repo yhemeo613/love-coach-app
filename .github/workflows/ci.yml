@@ -58,8 +58,8 @@ jobs:
   docker:
     name: Docker 镜像构建验证
     runs-on: ubuntu-latest
-    # 推送到 main 时由 CD 流程完整构建并部署，这里只在 PR 上验证两个 Dockerfile
-    if: github.event_name == 'pull_request'
+    # push 与 PR 都会验证两个 Dockerfile 能构建通过（用 GHA 缓存加速），
+    # 这样镜像构建问题在 CI 就暴露，不会等到 CD 部署到服务器才发现
     steps:
       - uses: actions/checkout@v4
 
@@ -78,5 +78,9 @@ jobs:
         with:
           context: ./embed
           push: false
+          # 注意：embed 镜像内的 apt/npm 已使用国内镜像源，GitHub 机器上同样可用
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 镜像概况
+        run: docker images --format "{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}" | head -10
