@@ -9,8 +9,12 @@ FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV EMBED_PORT=8080
+# 构建机器在国内：apt 换国内镜像源（可用 --build-arg DEBIAN_MIRROR= 覆盖）
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com
 # onnxruntime 动态链接需要 libgomp
-RUN apt-get update \
+RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g; s|http://security.debian.org|${DEBIAN_MIRROR}|g" \
+      /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    apt-get update \
   && apt-get install -y --no-install-recommends libgomp1 \
   && rm -rf /var/lib/apt/lists/*
 
