@@ -3,6 +3,8 @@ name: CD
 on:
   push:
     branches: [main]
+  # 支持在 Actions 页面或 gh workflow run CD 手动触发（用于重新部署/回滚后验证）
+  workflow_dispatch:
 
 # 同一时间只跑一次部署，排队而不是取消，避免半成品状态
 concurrency:
