@@ -15,3 +15,7 @@ generated/
 # 本地部署配置（服务器地址/密钥路径，勿提交）
 .env.deploy
 deploy-logs/
+
+# 浏览器验证截图与 playwright 缓存
+panel-*.png
+.playwright-mcp/
