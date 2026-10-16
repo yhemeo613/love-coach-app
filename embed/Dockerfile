@@ -1,8 +1,9 @@
 # 嵌入服务镜像：node:22-slim（onnxruntime-node 的官方预编译只覆盖 glibc，不能用 alpine）
 FROM node:22-slim AS deps
 WORKDIR /app
-# 构建机器在国内：npm 换国内镜像源（可用 --build-arg NPM_REGISTRY= 覆盖）
-ARG NPM_REGISTRY=https://registry.npmmirror.com
+# npm 源：默认官方源。实测本部署服务器（京东云）直连官方源 ~700KB/s，
+# 而国内镜像源（npmmirror）反而只有几百 B/s；如需覆盖用 --build-arg NPM_REGISTRY=
+ARG NPM_REGISTRY=https://registry.npmjs.org
 COPY package.json package-lock.json* ./
 # 有 lockfile 用 npm ci（可复现），否则退回 npm install
 RUN npm config set registry "${NPM_REGISTRY}" \
@@ -25,6 +26,15 @@ RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g; s|http://security.debian
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server.mjs ./
 COPY --chown=node:node models ./models
+
+# 只保留当前平台（linux-x64）需要的推理运行时：
+#  - onnxruntime-node 自带 darwin/win32/linux 三平台二进制，容器只用 linux（省 ~133MB）
+#  - onnxruntime-web 是浏览器后端，Node 下用不到（省 ~91MB）
+#  - @img/sharp-* 只服务图像模型，本服务只做文本嵌入（省 ~20MB）
+RUN rm -rf node_modules/onnxruntime-node/bin/napi-v3/darwin \
+           node_modules/onnxruntime-node/bin/napi-v3/win32 \
+           node_modules/onnxruntime-web \
+           node_modules/@img
 
 USER node
 EXPOSE 8080
