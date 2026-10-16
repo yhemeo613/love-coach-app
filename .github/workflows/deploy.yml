@@ -1,115 +1,66 @@
 name: CD
 
+# 部署流水线：push 到 main 自动部署；也支持 Actions 页面手动触发
+# 服务器端逻辑在 scripts/deploy-remote.sh（可评审、可本地复用）
 on:
   push:
     branches: [main]
-  # 支持在 Actions 页面或 gh workflow run CD 手动触发（用于重新部署/回滚后验证）
   workflow_dispatch:
 
-# 同一时间只跑一次部署，排队而不是取消，避免半成品状态
+# 部署串行：正在部署时新触发排队等待，绝不并发操作服务器
 concurrency:
   group: cd-deploy
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     name: 部署到服务器
     runs-on: ubuntu-latest
-    # 安全开关：默认不部署。在仓库 Settings → Variables 里把 DEPLOY_ENABLED
-    # 设为 true 后才会执行；服务器凭据见 README「CI/CD」一节的 Secrets 清单。
+    # 安全开关：仓库 Variables 里 DEPLOY_ENABLED=true 才会执行
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    environment: production
     steps:
-      - name: 部署前检查（Secrets 是否齐全）
+      - uses: actions/checkout@v4
+
+      - name: 部署前检查
         run: |
           missing=""
           [ -n "${{ secrets.SSH_HOST }}" ] || missing="$missing SSH_HOST"
           [ -n "${{ secrets.SSH_USER }}" ] || missing="$missing SSH_USER"
           [ -n "${{ secrets.SSH_KEY }}" ] || missing="$missing SSH_KEY"
           if [ -n "$missing" ]; then
-            echo "::error::缺少 Secrets:$missing"
+            echo "::error::缺少 Secrets:$missing（见 README「CI/CD」一节）"
             exit 1
           fi
-          echo "仓库：${{ github.repository }}"
-          echo "提交：${{ github.sha }}"
-          echo "触发：${{ github.event_name }}（${{ github.actor }}）"
-          echo "Secrets 检查通过"
+          echo "目标: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.SSH_PORT || 22 }}"
+          echo "目录: ${{ vars.APP_DIR || '/opt/apps/love-coach' }}"
+          echo "提交: ${{ github.sha }}（${{ github.event_name }} / ${{ github.actor }}）"
+          echo "检查通过"
 
-      - name: SSH 部署
-        uses: appleboy/ssh-action@v1
+      - name: 配置 SSH
+        uses: ./.github/actions/ssh-setup
         with:
           host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
+          user: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 首次部署含 Next.js 完整构建 + 语料全量向量化，给足时间
-          command_timeout: 45m
-          script_stop: true
-          script: |
-            set -e
-            cd ${{ vars.APP_DIR || '/opt/apps/love-coach' }}
 
-            hr() { echo; echo "======== $1 ========"; }
+      - name: 执行部署
+        run: |
+          ssh deploy-target "APP_DIR='${{ vars.APP_DIR || '/opt/apps/love-coach' }}' bash -s" \
+            < scripts/deploy-remote.sh 2>&1 | tee /tmp/deploy-output.log
 
-            hr "1/8 环境信息"
-            echo "主机: $(hostname) | 时间: $(date -Is)"
-            echo "Docker: $(docker --version)"
-            echo "Compose: $(docker compose version | head -1)"
-            free -m | head -2
-            df -h / | tail -1
+      - name: 采集部署摘要
+        if: always()
+        run: |
+          scp deploy-target:/tmp/deploy-summary.md /tmp/summary.md 2>/dev/null \
+            || echo "（未获取到部署摘要）" > /tmp/summary.md
+          cat /tmp/summary.md >> "$GITHUB_STEP_SUMMARY"
 
-            hr "2/8 拉取代码"
-            echo "拉取前: $(git log --oneline -1)"
-            git pull --ff-only
-            echo "拉取后: $(git log --oneline -1)"
-            echo "工作区变更（应只有被忽略的本地文件）:"
-            git status --short | head -5 || true
-
-            hr "3/8 构建镜像"
-            # embed 镜像单独维护：它的 npm 依赖约 380MB，服务器直连 npm 源较慢，
-            # 首次通过本机 docker save | ssh docker load 载入，之后 CD 不重复构建它。
-            if ! docker image inspect love-coach-embed:latest >/dev/null 2>&1; then
-              echo "::error::缺少 love-coach-embed:latest 镜像。请先在本机执行："
-              echo "::error::  docker compose build embed && docker save love-coach-embed:latest | gzip | ssh <server> 'gunzip | docker load'"
-              echo "::error::或在服务器执行 docker compose build embed（首次约 30-60 分钟）"
-              exit 1
-            fi
-            docker compose build app migrate rag-index 2>&1 | tail -25
-            echo "--- 镜像清单 ---"
-            docker images --format "{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}" | grep -E "love-coach|pgvector|redis" || true
-
-            hr "4/8 数据库迁移"
-            docker compose run --rm migrate
-            echo "--- 已应用迁移 ---"
-            docker compose exec -T postgres psql -U ${POSTGRES_USER:-lovecoach} -d ${POSTGRES_DB:-lovecoach} \
-              -Atc "SELECT migration_name FROM _prisma_migrations ORDER BY migration_name" || true
-
-            hr "5/8 原文语料索引（幂等：语料不变会秒级跳过）"
-            docker compose run --rm rag-index
-            echo "--- 片段统计 ---"
-            docker compose exec -T postgres psql -U ${POSTGRES_USER:-lovecoach} -d ${POSTGRES_DB:-lovecoach} \
-              -Atc "SELECT book, count(*) FROM rag_chunk GROUP BY book ORDER BY count(*) DESC LIMIT 5" || true
-            docker compose exec -T postgres psql -U ${POSTGRES_USER:-lovecoach} -d ${POSTGRES_DB:-lovecoach} \
-              -Atc "SELECT 'rag_chunk 总数=' || count(*) FROM rag_chunk" || true
-
-            hr "6/8 启动服务"
-            docker compose up -d
-            sleep 5
-            docker compose ps
-
-            hr "7/8 健康检查"
-            APP_PORT_VAL="$(sed -n 's/^APP_PORT=//p' .env | tail -1 | tr -d '\r')"
-            HEALTH_URL="http://127.0.0.1:${APP_PORT_VAL:-8080}/api/health"
-            echo "检查地址: $HEALTH_URL"
-            if ! curl -fsS --max-time 20 "$HEALTH_URL"; then
-              echo
-              echo "::error::健康检查失败，最近日志："
-              docker compose logs --tail=50 app
-              exit 1
-            fi
-
-            hr "8/8 嵌入服务自检"
-            docker compose exec -T embed node -e \
-              "fetch('http://127.0.0.1:8080/health').then(r=>r.json()).then(d=>console.log('embed:',JSON.stringify(d)))" || true
-
-            hr "部署完成"
-            echo "提交: $(git log --oneline -1) | 时间: $(date -Is)"
+      - name: 失败时抓取服务器日志
+        if: failure()
+        run: |
+          ssh deploy-target "cd ${{ vars.APP_DIR || '/opt/apps/love-coach' }} && docker compose ps && docker compose logs --tail=80 app" || true

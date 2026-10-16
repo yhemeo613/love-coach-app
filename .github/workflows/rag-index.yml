@@ -1,0 +1,74 @@
+name: RAG 索引
+
+# 语料索引专职流水线：与部署解耦，避免首轮索引（20-60 分钟）阻塞 CD。
+# 断点续跑：已索引的片段会跳过，中断后重跑即可续索引。
+on:
+  workflow_dispatch:
+    inputs:
+      max_minutes:
+        description: 最长跟踪分钟数（超时后任务继续在后台跑，重跑可续）
+        required: false
+        default: "90"
+      batch:
+        description: 每批向量化条数（越大吞吐越高、单次内存越多）
+        required: false
+        default: "48"
+  push:
+    branches: [main]
+    paths:
+      - "data/corpus/**"
+      - "lib/rag/**"
+      - "scripts/rag-index.mjs"
+      - "scripts/rag-index-remote.sh"
+
+concurrency:
+  group: rag-index
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  index:
+    name: 索引原文语料
+    runs-on: ubuntu-latest
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查凭据
+        run: |
+          missing=""
+          [ -n "${{ secrets.SSH_HOST }}" ] || missing="$missing SSH_HOST"
+          [ -n "${{ secrets.SSH_USER }}" ] || missing="$missing SSH_USER"
+          [ -n "${{ secrets.SSH_KEY }}" ] || missing="$missing SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 Secrets:$missing"
+            exit 1
+          fi
+
+      - name: 配置 SSH
+        uses: ./.github/actions/ssh-setup
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          user: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+
+      - name: 执行索引
+        run: |
+          ssh deploy-target "APP_DIR='${{ vars.APP_DIR || '/opt/apps/love-coach' }}' \
+            MAX_MINUTES='${{ inputs.max_minutes || '90' }}' \
+            RAG_INDEX_BATCH='${{ inputs.batch || '48' }}' \
+            bash -s" < scripts/rag-index-remote.sh 2>&1 | tee /tmp/index-output.log
+
+      - name: 采集索引报告
+        if: always()
+        run: |
+          scp deploy-target:/tmp/rag-index-summary.md /tmp/summary.md 2>/dev/null \
+            || echo "（未获取到索引报告）" > /tmp/summary.md
+          cat /tmp/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 失败时抓取索引日志
+        if: failure()
+        run: ssh deploy-target 'tail -40 /tmp/rag-index.log' || true

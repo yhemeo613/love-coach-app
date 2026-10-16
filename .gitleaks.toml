@@ -1,0 +1,14 @@
+# gitleaks 配置：扫描真实凭据，跳过语料与模型等非代码资源
+# （语料是 5.9M 字的书稿正文，纯文本里偶发的高熵串会造成误报）
+[extend]
+useDefault = true
+
+[allowlist]
+description = "跳过语料、模型与生成物"
+paths = [
+  '''data/corpus/.*''',
+  '''embed/models/.*''',
+  '''embed/package-lock.json''',
+  '''package-lock.json''',
+  '''prisma/migrations/.*''',
+]

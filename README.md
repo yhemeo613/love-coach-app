@@ -243,14 +243,35 @@ server {
 
 ## 六、CI/CD（GitHub Actions）
 
-工作流在 `.github/workflows/`：
+三条流水线，职责单一、互相解耦（服务器端逻辑在 `scripts/*-remote.sh`，可评审、可本地复用）：
 
 | 工作流 | 触发 | 内容 |
 |--------|------|------|
-| `ci.yml` | push / PR | 类型检查 + 生产构建；PR 额外验证 Dockerfile 可构建 |
-| `deploy.yml` | push 到 `main` | SSH 到服务器：`git pull` → 重建镜像 → 应用迁移 → 重启 → 健康检查 |
+| `ci.yml` | push / PR | ① 类型检查 + 生产构建；② **Prisma 迁移一致性**（在 pgvector 影子库上跑 `migrate diff`，schema 与迁移漂移即失败）；③ 两个 Dockerfile 构建验证；④ **密钥扫描**（gitleaks 全历史）+ **语料分块自检**（`scripts/rag-selftest.mjs`，防目录混入/碎片化等静默劣化） |
+| `deploy.yml` | push 到 `main` / 手动 | 服务器端 `scripts/deploy-remote.sh`：环境自检 → 拉码（失败自动重试）→ **pg_dump 备份**（保留最近 10 份）→ 构建并打 `love-coach:sha-<commit>` 版本标签 → 应用迁移 → 切换 → **健康门禁：不健康自动回滚到上一版本** → 冒烟测试（健康/嵌入服务/索引覆盖/登录页）→ 输出部署摘要（Actions 摘要面板可见） |
+| `rag-index.yml` | 手动 / `data/corpus`、`lib/rag` 变更 | 语料索引专职流水线（与部署解耦，避免首轮索引阻塞上线）：**断点续跑**（片段以内容哈希为主键）、每 30 秒采集进度、完成输出覆盖率报告。2 核服务器首轮约 20–60 分钟，中断后重跑即续 |
+
+常用命令：
+
+```bash
+gh workflow run CD                 # 手动触发部署
+gh workflow run "RAG 索引"          # 手动触发语料索引
+gh run list --limit 5              # 查看最近的运行
+bash deploy/watch.sh               # 服务器上实时看板（镜像/索引/健康）
+```
 
 ### 一次性配置
+
+**0. embed 镜像**（内含推理运行时，约 380MB npm 依赖，服务器首次构建较慢）：
+
+```bash
+# 推荐：本机构建后传输（本机到服务器通常比服务器直连快）
+docker compose build embed
+docker save love-coach-embed:latest | gzip | ssh <server> 'gunzip | docker load'
+# 或在服务器直接构建（首次约 30-60 分钟，之后 Docker 层缓存生效）
+```
+
+CD 会在 embed 镜像缺失时直接报错并给出上述提示，不会静默跳过。
 
 **1. 服务器目录转为 git 仓库**（原为 scp 上传目录，CD 依赖 `git pull`）：
 

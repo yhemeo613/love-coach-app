@@ -1,5 +1,7 @@
 name: CI
 
+# 校验流水线：类型检查 / 生产构建 / Prisma 迁移一致性 / 两个 Dockerfile 构建 /
+# 密钥扫描 / 语料分块自检。push 与 PR 都跑，问题在合入前暴露。
 on:
   push:
   pull_request:
@@ -12,13 +14,14 @@ permissions:
   contents: read
 
 jobs:
+  # ---------- 1. 类型检查与构建 ----------
   check:
     name: 类型检查 & 构建
     runs-on: ubuntu-latest
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       CHECKPOINT_DISABLE: "1"
-      # 与 Dockerfile 构建层保持一致的占位值，仅为通过导入期校验，运行时使用真实值
+      # 与 Dockerfile 构建层一致的占位值，仅为通过导入期校验
       DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
       REDIS_URL: redis://127.0.0.1:6379
       BETTER_AUTH_SECRET: build-time-placeholder-secret-not-used-at-runtime
@@ -32,8 +35,7 @@ jobs:
 
       - name: 环境信息
         run: |
-          echo "仓库：${{ github.repository }}"
-          echo "提交：${{ github.sha }}（${{ github.event_name }}）"
+          echo "仓库：${{ github.repository }} | 提交：${{ github.sha }}（${{ github.event_name }}）"
           node -v && npm -v
 
       - name: 安装依赖
@@ -50,19 +52,53 @@ jobs:
 
       - name: 构建产物概况
         run: |
-          echo "--- .next 体积 ---"
           du -sh .next 2>/dev/null || true
-          echo "--- standalone 入口 ---"
           ls -la .next/standalone/server.js 2>/dev/null || echo "（未生成 standalone）"
 
+  # ---------- 2. 数据库结构一致性 ----------
+  # 改了 schema.prisma 却没写迁移，或迁移与 schema 漂移，都在这里拦下
+  schema:
+    name: Prisma 迁移一致性
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: shadow
+          POSTGRES_PASSWORD: shadow
+          POSTGRES_DB: shadow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shadow"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CHECKPOINT_DISABLE: "1"
+      # 指向 shadow 库即可，diff 对比的是迁移目录与 schema，不碰真实数据
+      DATABASE_URL: postgresql://shadow:shadow@127.0.0.1:5432/shadow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+
+      - name: schema 与迁移比对（有漂移即失败）
+        run: |
+          npx prisma migrate diff \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url "postgresql://shadow:shadow@127.0.0.1:5432/shadow" \
+            --exit-code \
+          && echo "schema 与迁移一致"
+
+  # ---------- 3. Docker 镜像构建验证 ----------
   docker:
     name: Docker 镜像构建验证
     runs-on: ubuntu-latest
-    # push 与 PR 都会验证两个 Dockerfile 能构建通过（用 GHA 缓存加速），
-    # 这样镜像构建问题在 CI 就暴露，不会等到 CD 部署到服务器才发现
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
 
       - name: 构建应用镜像（不推送）
@@ -78,9 +114,29 @@ jobs:
         with:
           context: ./embed
           push: false
-          # 注意：embed 镜像内的 apt/npm 已使用国内镜像源，GitHub 机器上同样可用
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: 镜像概况
-        run: docker images --format "{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}" | head -10
+        run: docker images --format "{{.Repository}}:{{.Tag}}  {{.Size}}" | head -10
+
+  # ---------- 4. 安全与语料自检 ----------
+  hygiene:
+    name: 密钥扫描 & 语料自检
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks 需要完整历史
+
+      - name: 密钥扫描（gitleaks，扫全史）
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 语料分块自检（不需要数据库与模型，秒级）
+        run: node scripts/rag-selftest.mjs
