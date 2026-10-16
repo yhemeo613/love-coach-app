@@ -10,7 +10,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV EMBED_PORT=8080
 # 构建机器在国内：apt 换国内镜像源（可用 --build-arg DEBIAN_MIRROR= 覆盖）
-ARG DEBIAN_MIRROR=https://mirrors.aliyun.com
+# 注意用 http：node:22-slim 精简镜像未预装 ca-certificates，https 源会因证书缺失失败
+ARG DEBIAN_MIRROR=http://mirrors.aliyun.com
 # onnxruntime 动态链接需要 libgomp
 RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g; s|http://security.debian.org|${DEBIAN_MIRROR}|g" \
       /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
