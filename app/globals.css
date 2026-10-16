@@ -1,0 +1,293 @@
+@import "tailwindcss";
+
+/* 深色模式：跟随 .dark 类（由 theme-toggle 写入 localStorage 与 html class） */
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------
+   设计 token
+   配色取自成熟方案：暖中性灰（stone 系）+ 低饱和玫瑰主色
+   参考 Muted Rose (#e0c3c0 / #d1a8a1 / #ba9aa5) 的冷暖平衡，
+   主色下沉到 600 档以保证正文对比度，浅色仅用于背景与描边。
+   ------------------------------------------------------------------ */
+:root {
+  --background: #faf9f8;
+  --foreground: #1c1917;
+  --card: #ffffff;
+  --card-foreground: #1c1917;
+  --muted: #f4f2f1;
+  --muted-foreground: #78716c;
+  --border: #e7e5e4;
+  --input: #e7e5e4;
+  --ring: #e11d48;
+  --primary: #be123c;
+  --primary-foreground: #ffffff;
+  --accent-soft: #fff1f2;
+  --radius: 0.875rem;
+}
+
+.dark {
+  --background: #0c0a09;
+  --foreground: #f5f5f4;
+  --card: #171412;
+  --card-foreground: #f5f5f4;
+  --muted: #1f1b19;
+  --muted-foreground: #a8a29e;
+  --border: #2a2523;
+  --input: #2a2523;
+  --ring: #fb7185;
+  --primary: #e11d48;
+  --primary-foreground: #ffffff;
+  --accent-soft: #2a1218;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --radius-token: var(--radius);
+
+  /* 场景标签用的中性色阶（暖灰） */
+  --color-ink-50: #fafaf9;
+  --color-ink-100: #f5f5f4;
+  --color-ink-200: #e7e5e4;
+  --color-ink-300: #d6d3d1;
+  --color-ink-400: #a8a29e;
+  --color-ink-500: #78716c;
+  --color-ink-600: #57534e;
+  --color-ink-700: #44403c;
+  --color-ink-800: #292524;
+  --color-ink-900: #1c1917;
+  --color-ink-950: #0c0a09;
+
+  /* 主色阶（玫瑰）：供组件里的 brand-* 类名使用。
+     没有这段定义，bg-brand-600 之类的类不会生成任何样式。 */
+  --color-brand-50: #fff1f2;
+  --color-brand-100: #ffe4e6;
+  --color-brand-200: #fecdd3;
+  --color-brand-300: #fda4af;
+  --color-brand-400: #fb7185;
+  --color-brand-500: #f43f5e;
+  --color-brand-600: #e11d48;
+  --color-brand-700: #be123c;
+  --color-brand-800: #9f1239;
+  --color-brand-900: #881337;
+  --color-brand-950: #4c0519;
+
+  /* 阴影：组件里用 shadow-soft / shadow-lift */
+  --shadow-soft: 0 1px 2px rgba(28, 25, 23, 0.04), 0 8px 24px -12px rgba(28, 25, 23, 0.12);
+  --shadow-lift: 0 2px 4px rgba(28, 25, 23, 0.05), 0 18px 40px -18px rgba(190, 18, 60, 0.28);
+
+  --font-sans: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+  --animate-fade-up: fade-up 240ms ease-out both;
+  --animate-blink: blink 1s ease-in-out infinite;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.15;
+    }
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+@utility focus-ring {
+  outline: none;
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+@utility scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 162, 158, 0.5) transparent;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(168, 162, 158, 0.45);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(120, 113, 108, 0.7);
+    background-clip: content-box;
+  }
+}
+
+/* ------------------------------------------------------------------
+   Markdown 正文（教练回复）排版
+   ------------------------------------------------------------------ */
+.coach-prose {
+  font-size: 15px;
+  line-height: 1.75;
+  color: color-mix(in oklab, var(--foreground) 88%, transparent);
+  word-break: break-word;
+}
+
+.coach-prose > * + * {
+  margin-top: 0.75rem;
+}
+
+.coach-prose h1,
+.coach-prose h2,
+.coach-prose h3,
+.coach-prose h4 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.4;
+}
+
+.coach-prose h2 {
+  font-size: 1rem;
+}
+
+.coach-prose h3 {
+  font-size: 0.95rem;
+}
+
+.coach-prose strong {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.coach-prose ul,
+.coach-prose ol {
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.coach-prose ul {
+  list-style: disc;
+}
+
+.coach-prose ol {
+  list-style: decimal;
+}
+
+.coach-prose li::marker {
+  color: var(--primary);
+}
+
+.coach-prose blockquote {
+  border-left: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
+  background-color: color-mix(in oklab, var(--primary) 6%, transparent);
+  border-radius: 0 0.6rem 0.6rem 0;
+  padding: 0.6rem 0.85rem;
+}
+
+.coach-prose blockquote > * + * {
+  margin-top: 0.5rem;
+}
+
+.coach-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  background-color: var(--muted);
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.35rem;
+}
+
+.coach-prose pre {
+  overflow-x: auto;
+  background-color: var(--ink-900, #1c1917);
+  color: #f5f5f4;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  font-size: 0.82em;
+}
+
+.coach-prose pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.coach-prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.coach-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.coach-prose th,
+.coach-prose td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+
+.coach-prose th {
+  background-color: var(--muted);
+  font-weight: 500;
+}
+
+.coach-prose hr {
+  border-color: var(--border);
+}

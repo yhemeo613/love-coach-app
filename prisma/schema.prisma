@@ -1,0 +1,231 @@
+// Prisma 7：prisma-client 生成器，必须显式指定 output
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7：连接串移到 prisma.config.ts 的 datasource.url
+}
+
+/* ============================================================
+   Better Auth 核心表（user / session / account / verification）
+   + admin 插件字段（role / banned / banReason / banExpires /
+     session.impersonatedBy）
+   字段名与 Better Auth 的约定严格一致，不要改名。
+   ============================================================ */
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // --- admin 插件 ---
+  role           String?   @default("user")
+  banned         Boolean?  @default(false)
+  banReason      String?
+  banExpires     DateTime?
+  impersonatedBy String?
+
+  sessions Session[]
+  accounts Account[]
+
+  // --- 业务关联 ---
+  conversations Conversation[]
+  usageDaily    UsageDaily[]
+  auditLogs     AuditLog[]     @relation("AuditActor")
+  actionPlans   ActionPlan[]
+  reminders     Reminder[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id             String   @id
+  expiresAt      DateTime
+  token          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  impersonatedBy String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?   @db.Text
+  refreshToken          String?   @db.Text
+  idToken               String?   @db.Text
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+/* ============================================================
+   业务表
+   ============================================================ */
+
+/// 一次场景化对话
+model Conversation {
+  id        String   @id @default(uuid())
+  userId    String
+  sceneId   String
+  title     String   @default("新对话")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([userId, updatedAt])
+  @@index([updatedAt])
+  @@map("conversation")
+}
+
+/// 对话中的单条消息（只存文本，够用且便于后台审计）
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  role           String // user | assistant
+  content        String   @db.Text
+  charCount      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  // --- 生成元数据（用量与模型追踪） ---
+  model           String?
+  promptTokens    Int?
+  completionTokens Int?
+  cachedTokens    Int?
+  reasoningTokens Int?
+  toolCalls       Int      @default(0)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("message")
+}
+
+/// 教练生成的行动清单（工具 save_action_plan 写入）
+model ActionPlan {
+  id             String   @id @default(uuid())
+  userId         String
+  conversationId String?
+  title          String
+  steps          Json
+  status         String   @default("open") // open | done | archived
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("action_plan")
+}
+
+/// 跟进提醒（工具 set_followup_reminder 写入）
+model Reminder {
+  id             String    @id @default(uuid())
+  userId         String
+  conversationId String?
+  title          String
+  note           String?   @db.Text
+  dueAt          DateTime
+  status         String    @default("pending") // pending | done | cancelled
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dueAt])
+  @@map("reminder")
+}
+
+/// 按天聚合的用量（后台看板与用户配额展示用）
+model UsageDaily {
+  id              String   @id @default(uuid())
+  userId          String
+  day             DateTime @db.Date
+  requests        Int      @default(0)
+  promptChars     Int      @default(0)
+  completionChars Int      @default(0)
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  cachedTokens    Int      @default(0)
+  reasoningTokens Int      @default(0)
+  toolCalls       Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day])
+  @@index([day])
+  @@map("usage_daily")
+}
+
+/// 管理操作审计：谁在什么时候对谁做了什么
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  targetId  String?
+  detail    String?  @db.Text
+  ip        String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+/// 模型管理：上游模型的启用状态、默认模型与展示信息（后台可改）
+model ModelSetting {
+  id        String   @id @default(uuid())
+  /// 上游模型 id，如 deepseek-flash
+  modelId   String   @unique
+  /// 展示名，留空则用内置名称
+  label     String?
+  /// 运营备注，例如「促销期主推」
+  note      String?
+  /// 是否对用户可见可选
+  enabled   Boolean  @default(true)
+  /// 是否为站点默认模型（全局只应有一个 true，由接口保证）
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("model_setting")
+}

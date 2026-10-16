@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 类型检查 & 构建
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      CHECKPOINT_DISABLE: "1"
+      # 与 Dockerfile 构建层保持一致的占位值，仅为通过导入期校验，运行时使用真实值
+      DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
+      REDIS_URL: redis://127.0.0.1:6379
+      BETTER_AUTH_SECRET: build-time-placeholder-secret-not-used-at-runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 生成 Prisma Client
+        run: npx prisma generate
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建
+        run: npm run build
+
+  docker:
+    name: Docker 镜像构建验证
+    runs-on: ubuntu-latest
+    # 推送到 main 时由 CD 流程完整构建并推送镜像，这里只在 PR 上验证 Dockerfile
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像（不推送）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

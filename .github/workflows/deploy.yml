@@ -1,0 +1,50 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+# 同一时间只跑一次部署，排队而不是取消，避免半成品状态
+concurrency:
+  group: cd-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 部署到服务器
+    runs-on: ubuntu-latest
+    # 安全开关：默认不部署。在仓库 Settings → Variables 里把 DEPLOY_ENABLED
+    # 设为 true 后才会执行；服务器凭据见 README「CI/CD」一节的 Secrets 清单。
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    steps:
+      - name: SSH 部署（git pull → 重建 → 迁移 → 重启 → 健康检查）
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          # Next.js 在中小型服务器上完整重建可能需要十几分钟
+          command_timeout: 30m
+          script_stop: true
+          script: |
+            set -e
+            cd ${{ vars.APP_DIR || '/opt/apps/love-coach' }}
+            echo "== 拉取最新代码 =="
+            git pull --ff-only
+            echo "== 重建镜像 =="
+            docker compose build
+            echo "== 应用数据库迁移 =="
+            docker compose run --rm migrate
+            echo "== 重启应用 =="
+            docker compose up -d app
+            sleep 8
+            echo "== 健康检查 =="
+            APP_PORT_VAL="$(sed -n 's/^APP_PORT=//p' .env | tail -1 | tr -d '\r')"
+            if ! curl -fsS --max-time 15 "http://127.0.0.1:${APP_PORT_VAL:-8080}/api/health"; then
+              echo "健康检查失败，最近日志："
+              docker compose logs --tail=40 app
+              exit 1
+            fi
+            echo
+            echo "部署完成"

@@ -1,0 +1,112 @@
+# 生产部署编排：Postgres + Redis + 应用
+# 用法：
+#   1) cp .env.example .env 并填写密钥（LLM_API_KEY / BETTER_AUTH_SECRET / OAuth 等）
+#   2) docker compose build
+#   3) docker compose run --rm migrate      # 应用数据库迁移（一次性）
+#   4) docker compose up -d
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: love-coach-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lovecoach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lovecoach}
+      POSTGRES_DB: ${POSTGRES_DB:-lovecoach}
+      TZ: Asia/Shanghai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lovecoach} -d ${POSTGRES_DB:-lovecoach}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # 默认不对外暴露数据库端口；需要本机连库时再打开
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: love-coach-redis
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # 一次性迁移任务：复用构建阶段镜像（内含 prisma CLI 与迁移文件）
+  migrate:
+    build:
+      context: .
+      target: builder
+    profiles: ["tools"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lovecoach}:${POSTGRES_PASSWORD:-lovecoach}@postgres:5432/${POSTGRES_DB:-lovecoach}?schema=public
+      CHECKPOINT_DISABLE: "1"
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      target: runner
+    image: love-coach:latest
+    container_name: love-coach
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      CHECKPOINT_DISABLE: "1"
+      # 容器内走服务名，覆盖 .env 里的本机地址
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lovecoach}:${POSTGRES_PASSWORD:-lovecoach}@postgres:5432/${POSTGRES_DB:-lovecoach}?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      # 只监听需要的地址；如需公网直接访问改为 "3000:3000"
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  redisdata:
