@@ -197,11 +197,24 @@ export async function extractUserMemories(params: {
     model: createStructuredModel(config?.modelId ?? defaultModel(), { userId }),
     prompt,
     temperature: 0,
-    maxOutputTokens: 500,
+    // 多条事实的 JSON 容易超过 500 token 被截断（截断后 JSON.parse 必失败）：
+    // 默认给到 2048，并可经 MEMORY_MAX_TOKENS 调整
+    maxOutputTokens: Number(process.env.MEMORY_MAX_TOKENS || 2048),
     abortSignal: AbortSignal.timeout(20000),
   });
 
-  const parsed = JSON.parse(text) as { upsert?: unknown; forget?: unknown };
+  // 解析自带保护：模型输出被截断/为空时不抛异常，只跳过本轮记忆维护
+  let parsed: { upsert?: unknown; forget?: unknown };
+  try {
+    parsed = JSON.parse(text) as { upsert?: unknown; forget?: unknown };
+  } catch (error) {
+    console.error(
+      "[memory] 记忆抽取返回的不是合法 JSON（可能是输出被截断），本轮跳过：",
+      text.slice(0, 120),
+      error instanceof Error ? error.message : error,
+    );
+    return;
+  }
   const upserts = Array.isArray(parsed.upsert) ? parsed.upsert.slice(0, 8) : [];
   const forgets = Array.isArray(parsed.forget)
     ? parsed.forget.map((item) => String(item).trim()).filter(Boolean).slice(0, 8)

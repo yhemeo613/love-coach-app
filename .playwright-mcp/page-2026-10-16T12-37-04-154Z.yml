@@ -1,0 +1,26 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: 恋爱教练
+      - generic [ref=e9]:
+        - heading "把「我不会」变成 「我知道下一步做什么」" [level=1] [ref=e10]: 把「我不会」变成「我知道下一步做什么」
+        - paragraph [ref=e11]: 十一个场景化教练：从自我建设、开口、聊天、邀约，到关系维持与冲突处理。 每个回答都给出可落地、可撤回、可拒绝的具体做法。
+        - generic [ref=e12]:
+          - paragraph [ref=e13]: 不编造身份，不施压，不把「没有明确拒绝」当成同意
+          - paragraph [ref=e17]: 对话按账号隔离保存，可随时删除
+      - paragraph [ref=e21]: 如遇伤害或危机，请寻求线下专业支持（心理援助热线 12356）
+    - generic [ref=e23]:
+      - heading "登录后开始对话" [level=2] [ref=e24]
+      - paragraph [ref=e25]: 使用第三方账号一键登录，我们只读取你的昵称、邮箱与头像。
+      - button "使用 GitHub 登录" [ref=e27]
+      - generic [ref=e30]:
+        - paragraph [ref=e31]: 内部账号登录（本地联调 / 运营账号，生产环境默认关闭）
+        - generic [ref=e32]:
+          - textbox "昵称（注册时使用）" [ref=e33]
+          - textbox "邮箱" [ref=e34]
+          - textbox "密码（至少 8 位）" [ref=e35]
+          - generic [ref=e36]:
+            - button "登录" [disabled] [ref=e37]
+            - button "注册" [disabled] [ref=e41]
+      - paragraph [ref=e42]: 登录即表示同意：你的对话内容会保存在本服务中，用于展示历史记录与用量统计； 管理员可在后台查看用于运营与安全审计。可在对话页随时删除单条会话。
+  - alert [ref=e43]
