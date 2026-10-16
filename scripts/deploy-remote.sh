@@ -11,6 +11,9 @@ set -uo pipefail
 APP_DIR="${APP_DIR:-/opt/apps/love-coach}"
 cd "$APP_DIR" || { echo "找不到 $APP_DIR"; exit 1; }
 
+# 固定 compose 项目名：避免从其他目录误执行时创建出一套游离容器（用过 8b2944f0531e_ 前缀的那批）
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-love-coach}"
+
 HEALTH_FILE=/tmp/deploy-health.json
 SUMMARY=/tmp/deploy-summary.md
 BACKUP_DIR="$APP_DIR/backups"
@@ -28,14 +31,6 @@ hr() {
 fail() { echo; echo "[$(date '+%F %T')] ✗ $1"; exit 1; }
 
 : > "$SUMMARY"
-{
-  echo "## 部署摘要"
-  echo
-  echo "| 项目 | 值 |"
-  echo "|------|-----|"
-  echo "| 提交 | \`$SHA\` |"
-  echo "| 时间 | $(date '+%F %T %Z') |"
-} >> "$SUMMARY"
 
 hr "1/8 环境自检"
 echo "主机: $(hostname) | 项目目录: $APP_DIR | 时间: $(date -Is)"
@@ -62,6 +57,16 @@ fi
 SHA="$(git rev-parse --short HEAD)"
 echo "拉取后: $(git log --oneline -1)"
 git status --short | grep -v '^??' | head -5 || true
+
+# 摘要表头在拉取之后写，保证记录的是本次实际部署的提交
+{
+  echo "## 部署摘要"
+  echo
+  echo "| 项目 | 值 |"
+  echo "|------|-----|"
+  echo "| 提交 | \`$SHA\` |"
+  echo "| 时间 | $(date '+%F %T %Z') |"
+} > "$SUMMARY"
 
 hr "3/8 备份数据库"
 mkdir -p "$BACKUP_DIR"

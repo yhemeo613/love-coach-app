@@ -13,6 +13,9 @@ set -uo pipefail
 APP_DIR="${APP_DIR:-/opt/apps/love-coach}"
 cd "$APP_DIR" || { echo "找不到 $APP_DIR"; exit 1; }
 
+# 固定 compose 项目名，避免从其他目录误执行时创建游离容器
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-love-coach}"
+
 TOTAL="${TOTAL_CHUNKS:-9198}"
 BATCH="${RAG_INDEX_BATCH:-48}"
 MAX_MINUTES="${MAX_MINUTES:-90}"
