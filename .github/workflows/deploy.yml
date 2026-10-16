@@ -24,8 +24,8 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # Next.js 在中小型服务器上完整重建可能需要十几分钟
-          command_timeout: 30m
+          # 首次部署含 Next.js 完整构建 + 语料全量向量化，给足时间
+          command_timeout: 45m
           script_stop: true
           script: |
             set -e
@@ -36,6 +36,8 @@ jobs:
             docker compose build
             echo "== 应用数据库迁移 =="
             docker compose run --rm migrate
+            echo "== 索引原文语料（幂等，首次较慢）=="
+            docker compose run --rm rag-index
             echo "== 重启应用 =="
             docker compose up -d app
             sleep 8

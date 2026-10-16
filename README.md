@@ -63,6 +63,39 @@
 - `/tools` 分析工具（聊天记录结构化诊断、话术接龙）
 - `/account` 我的账号与用量（近 7 天 token 明细、缓存命中率、行动清单、待办提醒）
 
+### 6. 原文检索（RAG）
+教练回答具体方法、术语、话术时，通过 `search_books` 工具检索 **56 本原著全文**（约 590 万字，9200 个片段），
+返回带出处的原文片段，回答里标注「《书名》· 章节」，不再凭记忆复述。
+
+检索链路（目标是轻量模型下的最高正确率）：
+
+| 环节 | 做法 | 为什么 |
+|------|------|--------|
+| 向量召回 | bge-small-zh-v1.5（ONNX int8，24MB，本地 CPU 推理）→ pgvector 精确 KNN top 24 | 语义召回；精确 KNN 无近似索引的召回损失，9 千级片段下毫秒级 |
+| 词法召回 | 字级 2/3-gram + BM25 饱和，全量扫描 top 24 | 兜住术语与专名（「上堆」「三三法则」「已读不回」），补向量的短板 |
+| 融合 | RRF（名次融合，k=60） | 两路分值不可比，名次融合最稳 |
+| 去重 | 3-gram Jaccard 近似去重 | 语料含重复译本，避免同一内容挤占上下文 |
+| 重排 | 默认模型（deepseek-flash）对候选二次挑选 | 用 LLM 的判断力换精度，不额外部署模型 |
+| 降级 | embed 服务不可用 → 纯词法；重排失败 → 融合排序 | 任一环节失效都有兜底，检索不会中断 |
+
+分块质量上做了两件事：段落感知重组（语料来自不同提取器，有长行也有硬换行）+ 目录整体剔除
+（目录行关键词密度极高，会污染排序；按「短行 + 后文再现 + 点线导引」三重特征识别）。
+
+验证工具：`npm run rag:search -- "已读不回 要不要继续发"`（打印双路名次与融合结果，便于人工核对召回质量）。
+
+### 7. 对话记忆（窗口 + 滚动摘要 + 跨会话事实）
+三层记忆，解决「聊到第 30 轮就忘了开头」和「换个会话就失忆」：
+
+| 层 | 机制 | 说明 |
+|----|------|------|
+| 短期 | 最近 `CHAT_HISTORY_LIMIT`（默认 16）条逐字保留 | 最准，覆盖绝大多数对话 |
+| 会话内压缩 | 超出窗口的消息滚动压缩成**会话摘要**（`conversation.summary`） | 增量更新：只在新积压 ≥ `MEMORY_SUMMARY_CHUNK`（默认 8）条时重压缩一次；摘要注入系统提示词 |
+| 跨会话 | 稳定事实抽取为**键值记忆**（`user_memory`） | 每轮回复完成后异步抽取（年龄职业/关系阶段/目标对象/已给建议/禁忌…），同 key 覆盖、过时删除（ADD/UPDATE/DELETE 决策，参考 Mem0 的做法） |
+
+- 维护都发生在回复**完成之后**（`onFinish` 异步执行），不增加用户等待；任何一步失败只记日志，不影响对话。
+- 模型也可主动调用 `remember_about_user` 记住用户明确要求记住的内容；`get_user_context` 会返回全部长期记忆。
+- 开关：`MEMORY_SUMMARY=0` / `MEMORY_EXTRACT=0` 可分别关闭；摘要压缩对上下文长度的效果类似「服务端 compaction」。
+
 ---
 
 ## 二、技术栈与关键决策
@@ -75,6 +108,7 @@
 | 鉴权 | Better Auth 1.7 | 官方 Prisma 适配器 + admin 插件 + Redis 二级存储 |
 | ORM | Prisma 7.10 | 新的 `prisma-client` 生成器（必须指定 output）、driver adapter（`@prisma/adapter-pg`）、连接串写在 `prisma.config.ts` |
 | 数据库 | PostgreSQL 17 | 用户、会话、消息、用量、行动清单、提醒、审计 |
+| 检索 | pgvector + bge-small-zh-v1.5 | 原文 RAG：向量召回（本地 ONNX int8 推理）+ 词法召回 + LLM 重排，详见「一、功能 6」 |
 | 缓存 | Redis 7 | Better Auth 二级存储、限流计数、日配额、看板缓存、在线标记 |
 | 样式 | Tailwind CSS v4 | CSS-first 配置（`@theme` / `@utility`），无 `tailwind.config.ts` |
 | 图标 | lucide-react 1.58 | 品牌图标（GitHub/Google）内联 SVG，因 lucide 1.x 已移除品牌图标 |
@@ -88,20 +122,28 @@
 # 1. 安装依赖
 npm install
 
-# 2. 启动 Postgres 与 Redis（避开常见端口冲突）
+# 2. 启动 Postgres（pgvector 镜像）与 Redis（避开常见端口冲突）
 docker run -d --name lc-pg -e POSTGRES_USER=lovecoach -e POSTGRES_PASSWORD=lovecoach \
-  -e POSTGRES_DB=lovecoach -p 55432:5432 postgres:17-alpine
+  -e POSTGRES_DB=lovecoach -p 55432:5432 pgvector/pgvector:pg17
 docker run -d --name lc-redis -p 56379:6379 redis:7-alpine
+# 注意：RAG 依赖 vector 扩展，必须用 pgvector/pgvector:pg17；
+# 已有的 postgres:17-alpine 容器需要重建（扩展无法后装到 alpine 镜像里）。
 
 # 3. 配置环境变量
 cp .env.example .env    # 至少填 LLM_API_KEY、BETTER_AUTH_SECRET、DATABASE_URL、REDIS_URL
 # 本地联调建议：ALLOW_PASSWORD_LOGIN=1、ADMIN_EMAILS=你的邮箱
 
 # 4. 建表并生成客户端
-npm run db:deploy       # 应用迁移（首次即建全部表）
+npm run db:deploy       # 应用迁移（首次即建全部表，含 rag_chunk）
 npm run db:generate     # 生成 Prisma Client
 
-# 5. 启动
+# 5. 启动嵌入服务（本地 ONNX 推理，compose 映射到 127.0.0.1:8484）
+docker compose up -d embed
+
+# 6. 索引原文语料（首次约 3-8 分钟，之后语料不变则秒级跳过）
+npm run rag:index
+
+# 7. 启动
 npm run dev             # http://127.0.0.1:3000
 ```
 
@@ -262,6 +304,8 @@ git checkout -f -B main origin/main   # .env、deploy.log 不受影响（已在 
 | `GITHUB_CLIENT_ID/SECRET` | 否 | GitHub 登录 |
 | `GOOGLE_CLIENT_ID/SECRET` | 否 | Google 登录 |
 | `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_PER_DAY` | 否 | 单用户限流与日配额 |
+| `EMBED_URL` | 是 | 嵌入服务地址；compose 内固定 `http://embed:8080`，本地开发用 `http://127.0.0.1:8484` |
+| `RAG_RERANK` | 否 | 是否启用 LLM 重排，默认 `1`（关掉可省一次模型调用） |
 | `APP_PORT` | 否 | compose 对外端口 |
 
 ---

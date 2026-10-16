@@ -1,0 +1,13 @@
+{
+  "name": "love-coach-embed",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "本地文本嵌入服务（bge-small-zh-v1.5 ONNX int8）",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.5"
+  }
+}

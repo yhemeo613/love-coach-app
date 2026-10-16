@@ -11,7 +11,9 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "auth:generate": "auth generate"
+    "auth:generate": "auth generate",
+    "rag:index": "node scripts/rag-index.mjs",
+    "rag:search": "node scripts/rag-search.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.70",

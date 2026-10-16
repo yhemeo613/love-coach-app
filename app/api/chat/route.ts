@@ -10,6 +10,12 @@ import { DEFAULT_SCENE_ID, sceneMap } from "@/lib/scenes";
 import { getCurrentUser } from "@/lib/session";
 import { checkAndConsumeRateLimit, markActive, recordRateLimitRejection } from "@/lib/redis";
 import { appendAssistantMessage, appendUserMessage } from "@/lib/conversations";
+import {
+  buildMemoryPrompt,
+  extractUserMemories,
+  loadMemoryContext,
+  refreshConversationSummary,
+} from "@/lib/memory";
 import { effectiveMaxTokens, normalizeOptions } from "@/lib/ai/options";
 import { createChatModel } from "@/lib/ai/provider";
 import { resolveModel } from "@/lib/model-settings";
@@ -89,9 +95,19 @@ export async function POST(req: Request): Promise<Response> {
   const historyLimit = Math.max(2, Number(process.env.CHAT_HISTORY_LIMIT || 16));
   const recent = messages.slice(-historyLimit);
 
+  // 记忆注入：跨会话长期记忆 + 本会话较早内容的摘要（读取失败不影响对话）
+  let systemPrompt = scene.systemPrompt;
+  try {
+    const memory = await loadMemoryContext(user.id, conversationId);
+    const memoryPrompt = buildMemoryPrompt(memory);
+    if (memoryPrompt) systemPrompt = `${scene.systemPrompt}\n\n${memoryPrompt}`;
+  } catch (error) {
+    console.error("[chat] 读取记忆失败", error);
+  }
+
   const result = streamText({
     model: createChatModel(modelId, options, { userId: user.id }),
-    system: scene.systemPrompt,
+    system: systemPrompt,
     messages: await convertToModelMessages(recent),
     tools: createCoachTools({ userId: user.id, conversationId }),
     // 允许「检索知识 → 存行动清单」这类多步工具调用
@@ -144,6 +160,22 @@ export async function POST(req: Request): Promise<Response> {
         promptChars: lastUserText.length,
         completionChars: text.length,
       });
+
+      // 记忆维护：滚动摘要 + 跨会话事实抽取。
+      // 异步执行、互不阻塞；失败只记日志，不影响已经返回的回复。
+      if (conversationId) {
+        void refreshConversationSummary(conversationId, user.id).catch((error) => {
+          console.error("[chat] 会话摘要更新失败", error);
+        });
+        void extractUserMemories({
+          userId: user.id,
+          conversationId,
+          userText: lastUserText,
+          assistantText: text,
+        }).catch((error) => {
+          console.error("[chat] 长期记忆抽取失败", error);
+        });
+      }
     },
   });
 

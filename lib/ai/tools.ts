@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { rememberFact } from "@/lib/memory";
 import { prisma } from "@/lib/prisma";
+import { searchCorpus } from "@/lib/rag/search";
 import { scenes } from "@/lib/scenes";
 
 /** 从场景提示词中抽出「方法要点」段落，作为可检索知识 */
@@ -83,9 +85,51 @@ const SUPPORT_RESOURCES = [
  */
 export function createCoachTools({ userId, conversationId }: { userId: string; conversationId?: string }) {
   return {
-    search_knowledge: tool({
+    search_books: tool({
       description:
-        "检索本教练的知识库（十一个场景的方法要点）。当用户的问题涉及具体方法、判断标准或话术，而你需要在回答中引用明确的场景方法时调用。",
+        "检索 56 本原著全文（语义 + 词法双路召回、LLM 重排）。" +
+        "当用户的问题涉及具体方法、判断标准、术语、话术，或你需要在回答中引用原文依据时调用。" +
+        "返回的是带出处的原文片段，引用只能来自返回结果，不要编造书名、章节或页码。",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .describe("检索词：用户原话、场景或方法名，例如「已读不回」「邀约 决策成本」「上堆 下切」"),
+        book: z
+          .string()
+          .optional()
+          .describe("可选：限定在某本书内检索（书名关键词即可，如「魔鬼约会学」）"),
+        limit: z.number().int().min(1).max(6).optional().describe("返回片段数，默认 4"),
+      }),
+      execute: async ({ query, book, limit }) => {
+        const result = await searchCorpus(query, { book, limit: limit ?? 4, userId });
+        if (result.hits.length === 0) {
+          return {
+            matched: 0,
+            results: [],
+            hint: result.error
+              ? `检索服务不可用（${result.error}）。可以基于通用教练知识回答，但不要伪造原文引用，并如实说明暂时无法查证原文。`
+              : "原文没有直接命中。换更短、更具体的关键词再检索一次（例如只留核心名词或用户原话）。仍无命中就明确告诉用户「语料里没有直接依据」，不要编造书名、章节或页码。",
+          };
+        }
+        return {
+          matched: result.hits.length,
+          mode: result.mode,
+          reranked: result.reranked,
+          results: result.hits.map((hit) => ({
+            book: hit.book,
+            section: hit.heading,
+            excerpt: hit.text,
+            score: hit.score,
+          })),
+          hint: "引用出处用「《书名》· 章节」的形式，不要补充页码；观点用你自己的话概括，最多一两句直引，不要把整段原文抄给用户。",
+        };
+      },
+    }),
+
+    search_scenes: tool({
+      description:
+        "检索十一个教练场景（S0-S10）的方法要点，用于「用户的问题其实属于另一个阶段」时跨场景定位。" +
+        "注意：需要原文依据或具体话术时用 search_books，这个工具只给场景级方法概要。",
       inputSchema: z.object({
         query: z.string().describe("用户的问题或关键词，例如「约不出来」「已读不回」"),
       }),
@@ -96,7 +140,7 @@ export function createCoachTools({ userId, conversationId }: { userId: string; c
           results: matches,
           hint:
             matches.length === 0
-              ? "知识库没有直接命中的场景，按你自己的教练知识回答，不要编造出处。"
+              ? "没有直接命中的场景，按你自己的教练知识回答，不要编造出处。"
               : "引用时请给出场景代号与要点，不要虚构书目或页码。",
         };
       },
@@ -156,15 +200,37 @@ export function createCoachTools({ userId, conversationId }: { userId: string; c
       },
     }),
 
+    remember_about_user: tool({
+      description:
+        "把用户明确希望你记住的事实写入长期记忆（跨会话生效）。仅在用户主动要求记住、或纠正一个已写入的事实、或陈述了长期有效的重要背景时调用。" +
+        "不要把临时安排、单次情绪写进来，这些用 set_followup_reminder。",
+      inputSchema: z.object({
+        key: z
+          .string()
+          .describe("事实键，2-8 个汉字的稳定短语，如「年龄职业」「关系阶段」「目标对象」「禁忌」"),
+        value: z.string().describe("事实内容，一句话说清楚，例如「26 岁，程序员，母胎单身」"),
+      }),
+      execute: async ({ key, value }) => {
+        const saved = await rememberFact({
+          userId,
+          conversationId,
+          key,
+          value,
+        });
+        if (!saved) return { ok: false, error: "key 或 value 为空，未写入。" };
+        return { ok: true, ...saved, note: "已写入长期记忆，之后的对话都会带上这条信息。" };
+      },
+    }),
+
     get_user_context: tool({
       description:
-        "读取该用户的近期情况：历史对话主题、未完成的行动清单、待办提醒。当用户问「我之前跟你说过」「我上次的情况」或需要延续上一次建议时调用。",
+        "读取该用户的近期情况：长期记忆、历史对话主题、未完成的行动清单、待办提醒。当用户问「我之前跟你说过」「我上次的情况」或需要延续上一次建议时调用。",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(10).optional().describe("取最近几条对话，默认 5"),
       }),
       execute: async ({ limit }) => {
         const take = limit ?? 5;
-        const [conversations, plans, reminders] = await Promise.all([
+        const [conversations, plans, reminders, memories] = await Promise.all([
           prisma.conversation.findMany({
             where: { userId },
             orderBy: { updatedAt: "desc" },
@@ -189,9 +255,20 @@ export function createCoachTools({ userId, conversationId }: { userId: string; c
             take: 5,
             select: { id: true, title: true, dueAt: true },
           }),
+          prisma.userMemory.findMany({
+            where: { userId },
+            orderBy: { updatedAt: "desc" },
+            take: 30,
+            select: { key: true, value: true, updatedAt: true },
+          }),
         ]);
 
         return {
+          longTermMemories: memories.map((memory) => ({
+            key: memory.key,
+            value: memory.value,
+            updatedAt: memory.updatedAt.toISOString(),
+          })),
           conversations: conversations.map((c) => ({
             id: c.id,
             title: c.title,

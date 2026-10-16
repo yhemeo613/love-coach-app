@@ -1,12 +1,14 @@
-# 生产部署编排：Postgres + Redis + 应用
+# 生产部署编排：Postgres(pgvector) + Redis + 嵌入服务 + 应用
 # 用法：
 #   1) cp .env.example .env 并填写密钥（LLM_API_KEY / BETTER_AUTH_SECRET / OAuth 等）
 #   2) docker compose build
 #   3) docker compose run --rm migrate      # 应用数据库迁移（一次性）
-#   4) docker compose up -d
+#   4) docker compose run --rm rag-index    # 索引原文语料（一次性，幂等）
+#   5) docker compose up -d
 services:
+  # pgvector 官方镜像 = postgres 17 + vector 扩展（数据目录与官方镜像兼容）
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     container_name: love-coach-pg
     restart: unless-stopped
     environment:
@@ -49,6 +51,36 @@ services:
       retries: 10
       start_period: 10s
 
+  # 本地嵌入服务：bge-small-zh-v1.5（ONNX int8），只在内网供应用与索引脚本调用
+  embed:
+    build:
+      context: ./embed
+    image: love-coach-embed:latest
+    container_name: love-coach-embed
+    restart: unless-stopped
+    environment:
+      EMBED_PORT: "8080"
+    ports:
+      # 仅监听本机，供本机开发（npm run dev）连；容器间走 http://embed:8080
+      - "127.0.0.1:8484:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health').then(r=>r.json()).then(d=>process.exit(d.ready?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # 一次性迁移任务：复用构建阶段镜像（内含 prisma CLI 与迁移文件）
   migrate:
     build:
@@ -63,6 +95,25 @@ services:
     command: ["npx", "prisma", "migrate", "deploy"]
     depends_on:
       postgres:
+        condition: service_healthy
+
+  # 一次性索引任务：分块语料 → 调嵌入服务 → 写入 pgvector（幂等，语料不变时秒级跳过）
+  rag-index:
+    build:
+      context: .
+      target: builder
+    profiles: ["tools"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lovecoach}:${POSTGRES_PASSWORD:-lovecoach}@postgres:5432/${POSTGRES_DB:-lovecoach}?schema=public
+      EMBED_URL: http://embed:8080
+      CHECKPOINT_DISABLE: "1"
+    command: ["node", "scripts/rag-index.mjs"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embed:
         condition: service_healthy
 
   app:
@@ -81,6 +132,7 @@ services:
       # 容器内走服务名，覆盖 .env 里的本机地址
       DATABASE_URL: postgresql://${POSTGRES_USER:-lovecoach}:${POSTGRES_PASSWORD:-lovecoach}@postgres:5432/${POSTGRES_DB:-lovecoach}?schema=public
       REDIS_URL: redis://redis:6379
+      EMBED_URL: http://embed:8080
     ports:
       # 只监听需要的地址；如需公网直接访问改为 "3000:3000"
       - "${APP_PORT:-3000}:3000"
@@ -89,6 +141,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # 嵌入服务未就绪时应用仍可启动（检索会降级为词法），因此只要求已启动
+      embed:
+        condition: service_started
     healthcheck:
       test:
         [

@@ -41,6 +41,7 @@ model User {
   auditLogs     AuditLog[]     @relation("AuditActor")
   actionPlans   ActionPlan[]
   reminders     Reminder[]
+  memories      UserMemory[]
 
   @@unique([email])
   @@map("user")
@@ -107,6 +108,10 @@ model Conversation {
   userId    String
   sceneId   String
   title     String   @default("新对话")
+  /// 滚动摘要：较早消息的压缩结果，超出上下文窗口的历史靠它保留
+  summary   String?  @db.Text
+  /// 摘要已覆盖的消息条数（时间序，用于增量更新）
+  summarizedCount Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -116,6 +121,25 @@ model Conversation {
   @@index([userId, updatedAt])
   @@index([updatedAt])
   @@map("conversation")
+}
+
+/// 跨会话长期记忆：从对话里抽取的稳定事实（键值对，同 key 覆盖）
+model UserMemory {
+  id             String   @id @default(uuid())
+  userId         String
+  /// 事实键，如「关系阶段」「目标对象」
+  key            String
+  value          String   @db.Text
+  /// 来源会话，便于追溯
+  conversationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId, updatedAt])
+  @@map("user_memory")
 }
 
 /// 对话中的单条消息（只存文本，够用且便于后台审计）
@@ -228,4 +252,26 @@ model ModelSetting {
   updatedAt DateTime @updatedAt
 
   @@map("model_setting")
+}
+
+/// RAG 原文片段（56 本原著分块后的向量检索单元）。
+/// 由 scripts/rag-index.mjs 写入，应用侧用 $queryRaw 检索；
+/// embedding 是 pgvector 列，Prisma Client 不直接读写，声明在此只为保证迁移一致。
+model RagChunk {
+  id         String                      @id
+  /// 书名（语料文件名，不含扩展名）
+  book       String
+  /// 章节/小节标题（尽力而为，可能为空）
+  heading    String                      @default("")
+  /// 片段在书内的序号
+  chunkIndex Int
+  /// 片段起始字符位置（近似）
+  offset     Int
+  text       String
+  /// bge-small-zh-v1.5 的 512 维向量（余弦距离）
+  embedding  Unsupported("vector(512)")
+  updatedAt  DateTime                    @default(now())
+
+  @@index([book])
+  @@map("rag_chunk")
 }

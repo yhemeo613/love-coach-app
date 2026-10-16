@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, Activity, ListChecks, Bell, Gauge } from "lucide-react";
 import { requireUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { MemoryList } from "@/components/memory-list";
 import { getUsageTotals } from "@/lib/ai/usage";
 import { getUsage, LIMITS } from "@/lib/redis";
 
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function AccountPage() {
   const user = await requireUser("/login?next=/account");
 
-  const [quota, totals, plans, reminders, conversationCount, messageCount] = await Promise.all([
+  const [quota, totals, plans, reminders, conversationCount, messageCount, memories] = await Promise.all([
     getUsage(user.id),
     getUsageTotals(user.id, 7),
     prisma.actionPlan.findMany({
@@ -29,6 +30,12 @@ export default async function AccountPage() {
     }),
     prisma.conversation.count({ where: { userId: user.id } }),
     prisma.message.count({ where: { conversation: { userId: user.id } } }),
+    prisma.userMemory.findMany({
+      where: { userId: user.id },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      select: { id: true, key: true, value: true, updatedAt: true },
+    }),
   ]);
 
   const cards = [
@@ -168,6 +175,15 @@ export default async function AccountPage() {
               </ul>
             )}
           </section>
+
+          <MemoryList
+            initial={memories.map((memory) => ({
+              id: memory.id,
+              key: memory.key,
+              value: memory.value,
+              updatedAt: memory.updatedAt.toISOString(),
+            }))}
+          />
         </div>
       </div>
     </div>
