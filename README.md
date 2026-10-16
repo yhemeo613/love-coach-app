@@ -251,12 +251,28 @@ server {
 | `deploy.yml` | push 到 `main` / 手动 | 服务器端 `scripts/deploy-remote.sh`：环境自检 → 拉码（失败自动重试）→ **pg_dump 备份**（保留最近 10 份）→ 构建并打 `love-coach:sha-<commit>` 版本标签 → 应用迁移 → 切换 → **健康门禁：不健康自动回滚到上一版本** → 冒烟测试（健康/嵌入服务/索引覆盖/登录页）→ 输出部署摘要（Actions 摘要面板可见） |
 | `rag-index.yml` | 手动 / `data/corpus`、`lib/rag` 变更 | 语料索引专职流水线（与部署解耦，避免首轮索引阻塞上线）：**断点续跑**（片段以内容哈希为主键）、每 30 秒采集进度、完成输出覆盖率报告。2 核服务器首轮约 20–60 分钟，中断后重跑即续 |
 
+### 部署通道（两条，执行的是同一套服务器端脚本）
+
+| 通道 | 用法 | 适用 |
+|------|------|------|
+| **本机 SSH（推荐）** | 本机执行 `bash deploy/deploy.sh` | 国内服务器对 GitHub 云 runner 的 SSH 偶发抖动，本机链路更稳；输出与 CD 完全一致（备份/回滚/冒烟/摘要） |
+| GitHub Actions CD | push 到 `main` 自动执行，或手动 `gh workflow run CD` | 团队协作、无人值守场景 |
+
+本机通道的配置放在 `.env.deploy`（已被 `.gitignore` 忽略）：
+
+```bash
+DEPLOY_HOST=<服务器公网IP>
+DEPLOY_USER=root
+DEPLOY_SSH_KEY=<私钥路径>          # 默认 ~/.ssh/id_ed25519
+APP_DIR=/opt/apps/love-coach
+```
+
 常用命令：
 
 ```bash
-gh workflow run CD                 # 手动触发部署
-gh workflow run "RAG 索引"          # 手动触发语料索引
-gh run list --limit 5              # 查看最近的运行
+bash deploy/deploy.sh              # 本机一键部署（推荐）
+gh workflow run CD                 # 从 Actions 触发部署
+gh workflow run "RAG 索引"          # 从 Actions 触发语料索引
 bash deploy/watch.sh               # 服务器上实时看板（镜像/索引/健康）
 ```
 

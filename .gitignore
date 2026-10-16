@@ -11,3 +11,6 @@ dist
 generated/
 # TypeScript 增量构建缓存
 *.tsbuildinfo
+
+# 本地部署配置（服务器地址/密钥路径，勿提交）
+.env.deploy
