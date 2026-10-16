@@ -115,7 +115,7 @@ export async function POST(req: Request): Promise<Response> {
     temperature: options.temperature ?? Number(process.env.LLM_TEMPERATURE || 0.7),
     topP: options.topP,
     maxOutputTokens:
-      effectiveMaxTokens(options.maxTokens, Boolean(options.thinking)) ??
+      effectiveMaxTokens(options.maxTokens, Boolean(options.thinking), options.reasoningEffort) ??
       Number(process.env.LLM_MAX_TOKENS || 1600),
     stopSequences: options.stop,
     abortSignal: req.signal,

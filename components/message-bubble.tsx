@@ -115,8 +115,8 @@ export function MessageBubble({
           {/* 思考模式的推理与正文共享 token 预算：预算耗尽时会只有思考没有正文 */}
           {!streaming && reasoningParts.length > 0 && textParts.length === 0 ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-[12.5px] leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              本次输出被 token 上限截断，只产生了思考过程、没有正文。请在右上角参数面板调高「最大输出
-              tokens」（建议 8K 以上），或关闭思考模式后重试。
+              本次输出的 token 预算被推理过程耗尽，只产生了思考、没有正文。请在右上角参数面板把「最大输出
+              tokens」调大（最低强度建议 ≥16K、高强度 ≥32K、最高强度 ≥64K），或降低思考强度 / 关闭思考模式后重试。
             </div>
           ) : null}
         </div>

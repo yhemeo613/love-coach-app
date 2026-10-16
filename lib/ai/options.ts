@@ -21,9 +21,18 @@ export const DEFAULT_EFFORT = "high" as const;
 /**
  * 思考模式下 max_tokens 同时覆盖「推理」与「正文」。
  * 若沿用非思考模式的小额度（如 1600），推理会把预算吃光、正文为空。
- * 这里给思考模式一个安全下限。
+ * 这里按思考强度给安全下限：强度越高、推理越长，预算必须越大。
+ *
+ * 依据（2026-10 核对 api-docs.deepseek.com）：
+ *  - 上下文 1M、最大输出 384K；接口对 max_tokens 直到 393216 均接受（实测）
+ *  - 文档将思考模式列为默认能力，未单列 reasoning token 的独立上限，
+ *    即推理与正文共享输出预算 —— 因此下限必须按强度分级而不是给固定 8K
  */
-export const THINKING_MIN_OUTPUT_TOKENS = 8192;
+export const THINKING_MIN_OUTPUT_TOKENS: Record<"low" | "high" | "max", number> = {
+  low: 16384,
+  high: 32768,
+  max: 65536,
+};
 
 /** 官方上限：输出最多 384K（393216）tokens；上下文 1M */
 export const MAX_OUTPUT_TOKENS = 393216;
@@ -32,9 +41,10 @@ export const CONTEXT_WINDOW_TOKENS = 1000000;
 export function effectiveMaxTokens(
   maxTokens: number | undefined,
   thinking: boolean,
+  reasoningEffort: "low" | "high" | "max" = DEFAULT_EFFORT,
 ): number | undefined {
   if (!thinking) return maxTokens;
-  return Math.max(maxTokens ?? 0, THINKING_MIN_OUTPUT_TOKENS);
+  return Math.max(maxTokens ?? 0, THINKING_MIN_OUTPUT_TOKENS[reasoningEffort]);
 }
 
 export function normalizeOptions(raw: Record<string, unknown>): ChatRequestOptions {

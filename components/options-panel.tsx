@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown, Cpu, Gauge, Loader2, SlidersHorizontal, Wallet, Zap } from "lucide-react";
+import { THINKING_MIN_OUTPUT_TOKENS, type ChatRequestOptions } from "@/lib/ai/options";
 import { cn } from "@/lib/utils";
 
 export interface ChatSettings {
@@ -149,8 +150,14 @@ export function OptionsPanel({
                   patch(
                     settings.thinking
                       ? { thinking: false }
-                      : // 思考模式的推理与正文共享 token 预算，开启时抬高下限
-                        { thinking: true, maxTokens: Math.max(settings.maxTokens, 8192) },
+                      : // 思考模式的推理与正文共享 token 预算，开启时按强度抬高下限
+                        {
+                          thinking: true,
+                          maxTokens: Math.max(
+                            settings.maxTokens,
+                            THINKING_MIN_OUTPUT_TOKENS[settings.reasoningEffort ?? "high"],
+                          ),
+                        },
                   )
                 }
                 className={cn(
@@ -176,7 +183,16 @@ export function OptionsPanel({
                     key={effort.value}
                     type="button"
                     title={effort.hint}
-                    onClick={() => patch({ reasoningEffort: effort.value })}
+                    onClick={() =>
+                      patch({
+                        reasoningEffort: effort.value,
+                        // 强度越高推理越长：切换时同步抬高 token 预算，避免只剩思考没有正文
+                        maxTokens: Math.max(
+                          settings.maxTokens,
+                          THINKING_MIN_OUTPUT_TOKENS[effort.value],
+                        ),
+                      })
+                    }
                     className={cn(
                       "flex-1 rounded-lg border px-2 py-1.5 text-[12px] transition",
                       settings.reasoningEffort === effort.value
@@ -230,7 +246,7 @@ export function OptionsPanel({
                 />
               </span>
               <div className="mt-1 flex gap-1.5">
-                {[1600, 8192, 32768, 131072].map((preset) => (
+                {[4096, 16384, 65536, 131072].map((preset) => (
                   <button
                     key={preset}
                     type="button"
@@ -247,7 +263,7 @@ export function OptionsPanel({
                 ))}
               </div>
               <span className="text-[10.5px] text-[var(--muted-foreground)]">
-                上限 384K（393216）；上下文窗口 1M。思考模式的推理与正文共享该预算，建议不低于 8K。
+                上限 384K（393216）；上下文窗口 1M。思考模式推理与正文共享预算：低/高/最高强度分别建议 ≥16K / 32K / 64K（开启思考时自动抬高）。
               </span>
             </div>
 
