@@ -289,7 +289,8 @@ export function ChatView({ user }: Props) {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--card)]/85 px-3 py-3 backdrop-blur sm:px-6">
+        {/* relative + z-index：为顶栏建立独立层叠上下文，否则设置面板等绝对定位子元素会被后面的消息区盖住 */}
+        <header className="relative z-30 flex items-center gap-3 border-b border-[var(--border)] bg-[var(--card)]/85 px-3 py-3 backdrop-blur sm:px-6">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
