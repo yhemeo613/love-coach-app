@@ -65,7 +65,15 @@ jobs:
             git status --short | head -5 || true
 
             hr "3/8 构建镜像"
-            docker compose build 2>&1 | tail -25
+            # embed 镜像单独维护：它的 npm 依赖约 380MB，服务器直连 npm 源较慢，
+            # 首次通过本机 docker save | ssh docker load 载入，之后 CD 不重复构建它。
+            if ! docker image inspect love-coach-embed:latest >/dev/null 2>&1; then
+              echo "::error::缺少 love-coach-embed:latest 镜像。请先在本机执行："
+              echo "::error::  docker compose build embed && docker save love-coach-embed:latest | gzip | ssh <server> 'gunzip | docker load'"
+              echo "::error::或在服务器执行 docker compose build embed（首次约 30-60 分钟）"
+              exit 1
+            fi
+            docker compose build app migrate rag-index 2>&1 | tail -25
             echo "--- 镜像清单 ---"
             docker images --format "{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}" | grep -E "love-coach|pgvector|redis" || true
 
