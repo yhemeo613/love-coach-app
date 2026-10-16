@@ -8,6 +8,12 @@ COPY package.json package-lock.json* ./
 # 有 lockfile 用 npm ci（可复现），否则退回 npm install
 RUN npm config set registry "${NPM_REGISTRY}" \
   && if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+# 只保留当前平台（linux-x64）需要的推理二进制：onnxruntime-node 自带
+# darwin/win32/linux 三平台，容器只用 linux（省 ~133MB）。
+# 注意：不能裁 onnxruntime-web 与 @img/sharp——transformers.js 在 Node 下
+# 加载时会 require sharp，裁掉会在启动时直接崩溃。
+RUN rm -rf node_modules/onnxruntime-node/bin/napi-v3/darwin \
+           node_modules/onnxruntime-node/bin/napi-v3/win32
 
 FROM node:22-slim AS runner
 WORKDIR /app
@@ -26,15 +32,6 @@ RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g; s|http://security.debian
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server.mjs ./
 COPY --chown=node:node models ./models
-
-# 只保留当前平台（linux-x64）需要的推理运行时：
-#  - onnxruntime-node 自带 darwin/win32/linux 三平台二进制，容器只用 linux（省 ~133MB）
-#  - onnxruntime-web 是浏览器后端，Node 下用不到（省 ~91MB）
-#  - @img/sharp-* 只服务图像模型，本服务只做文本嵌入（省 ~20MB）
-RUN rm -rf node_modules/onnxruntime-node/bin/napi-v3/darwin \
-           node_modules/onnxruntime-node/bin/napi-v3/win32 \
-           node_modules/onnxruntime-web \
-           node_modules/@img
 
 USER node
 EXPOSE 8080
