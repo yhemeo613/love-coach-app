@@ -1,9 +1,12 @@
 # 嵌入服务镜像：node:22-slim（onnxruntime-node 的官方预编译只覆盖 glibc，不能用 alpine）
 FROM node:22-slim AS deps
 WORKDIR /app
+# 构建机器在国内：npm 换国内镜像源（可用 --build-arg NPM_REGISTRY= 覆盖）
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 COPY package.json package-lock.json* ./
 # 有 lockfile 用 npm ci（可复现），否则退回 npm install
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+RUN npm config set registry "${NPM_REGISTRY}" \
+  && if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
 FROM node:22-slim AS runner
 WORKDIR /app
