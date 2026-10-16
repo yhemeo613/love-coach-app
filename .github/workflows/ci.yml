@@ -8,6 +8,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: 类型检查 & 构建
@@ -27,6 +30,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: 环境信息
+        run: |
+          echo "仓库：${{ github.repository }}"
+          echo "提交：${{ github.sha }}（${{ github.event_name }}）"
+          node -v && npm -v
+
       - name: 安装依赖
         run: npm ci
 
@@ -36,23 +45,38 @@ jobs:
       - name: 类型检查
         run: npm run typecheck
 
-      - name: 构建
+      - name: 生产构建
         run: npm run build
+
+      - name: 构建产物概况
+        run: |
+          echo "--- .next 体积 ---"
+          du -sh .next 2>/dev/null || true
+          echo "--- standalone 入口 ---"
+          ls -la .next/standalone/server.js 2>/dev/null || echo "（未生成 standalone）"
 
   docker:
     name: Docker 镜像构建验证
     runs-on: ubuntu-latest
-    # 推送到 main 时由 CD 流程完整构建并推送镜像，这里只在 PR 上验证 Dockerfile
+    # 推送到 main 时由 CD 流程完整构建并部署，这里只在 PR 上验证两个 Dockerfile
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: 构建镜像（不推送）
+      - name: 构建应用镜像（不推送）
         uses: docker/build-push-action@v6
         with:
           context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 构建嵌入服务镜像（不推送）
+        uses: docker/build-push-action@v6
+        with:
+          context: ./embed
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
