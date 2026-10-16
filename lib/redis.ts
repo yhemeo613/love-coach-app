@@ -11,10 +11,13 @@ const globalForRedis = globalThis as unknown as { redis?: Redis };
 
 function createClient(): Redis {
   const url = process.env.REDIS_URL || "redis://127.0.0.1:6379";
+  // 构建期（next build 收集页面数据时会导入本模块）不建立真实连接：
+  // 否则会刷屏 ECONNREFUSED，而这些连接在构建里没有任何用途。
+  const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
   const client = new Redis(url, {
     maxRetriesPerRequest: 3,
     enableReadyCheck: true,
-    lazyConnect: false,
+    lazyConnect: isBuildPhase,
     keyPrefix: "",
   });
 

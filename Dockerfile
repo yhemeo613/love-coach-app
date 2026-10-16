@@ -17,6 +17,13 @@ ENV CHECKPOINT_DISABLE=1
 ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
 ENV REDIS_URL="redis://127.0.0.1:6379"
 ENV BETTER_AUTH_SECRET="build-time-placeholder-secret-not-used-at-runtime"
+# 构建期占位：避免 page data collection 时 Better Auth 报「缺少 clientId/clientSecret」噪音；
+# 运行时由 compose 的 env_file 覆盖为真实值
+ENV BETTER_AUTH_URL="http://127.0.0.1:3000"
+ENV GITHUB_CLIENT_ID="build-placeholder"
+ENV GITHUB_CLIENT_SECRET="build-placeholder"
+ENV GOOGLE_CLIENT_ID="build-placeholder"
+ENV GOOGLE_CLIENT_SECRET="build-placeholder"
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
