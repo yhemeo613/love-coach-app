@@ -120,6 +120,10 @@ services:
     build:
       context: .
       target: runner
+      # NEXT_PUBLIC_* 是构建期变量，从这里透传进镜像（运行时改 .env 无效）
+      args:
+        NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN: ${NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN:-0}
+        NEXT_PUBLIC_SITE_NAME: ${NEXT_PUBLIC_SITE_NAME:-恋爱教练}
     image: love-coach:latest
     container_name: love-coach
     restart: unless-stopped

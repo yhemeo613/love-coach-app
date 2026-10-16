@@ -24,6 +24,12 @@ ENV GITHUB_CLIENT_ID="build-placeholder"
 ENV GITHUB_CLIENT_SECRET="build-placeholder"
 ENV GOOGLE_CLIENT_ID="build-placeholder"
 ENV GOOGLE_CLIENT_SECRET="build-placeholder"
+# NEXT_PUBLIC_* 是构建期变量（会被打进客户端代码），必须在这里注入；
+# 运行时改 .env 不会生效。compose 通过 build.args 从 .env 透传。
+ARG NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN=0
+ARG NEXT_PUBLIC_SITE_NAME=恋爱教练
+ENV NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN=$NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN
+ENV NEXT_PUBLIC_SITE_NAME=$NEXT_PUBLIC_SITE_NAME
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
