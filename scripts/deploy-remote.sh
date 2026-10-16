@@ -16,9 +16,16 @@ SUMMARY=/tmp/deploy-summary.md
 BACKUP_DIR="$APP_DIR/backups"
 KEEP_BACKUPS=10
 SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+DEPLOY_START=$(date +%s)
+STEP_START=$DEPLOY_START
 
-hr() { echo; echo "======== $1 ========"; }
-fail() { echo "!! $1"; exit 1; }
+hr() {
+  NOW=$(date +%s)
+  echo
+  echo "[$(date '+%F %T')] ════════ $1 ════════（本步 $((NOW - STEP_START))s / 累计 $((NOW - DEPLOY_START))s）"
+  STEP_START=$NOW
+}
+fail() { echo; echo "[$(date '+%F %T')] ✗ $1"; exit 1; }
 
 : > "$SUMMARY"
 {

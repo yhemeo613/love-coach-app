@@ -13,7 +13,9 @@
     "db:studio": "prisma studio",
     "auth:generate": "auth generate",
     "rag:index": "node scripts/rag-index.mjs",
-    "rag:search": "node scripts/rag-search.mjs"
+    "rag:search": "node scripts/rag-search.mjs",
+    "deploy": "bash deploy/deploy.sh",
+    "deploy:index": "bash deploy/index.sh"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.70",
