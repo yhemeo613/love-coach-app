@@ -98,8 +98,8 @@ else
 fi
 docker tag love-coach:latest "love-coach:sha-$SHA" 2>/dev/null || true
 
-# 迁移/索引镜像（builder 目标）只在迁移目录或索引脚本变化时重建，否则复用现有镜像
-TOOLS_HASH="$(git rev-parse "HEAD:prisma/migrations" 2>/dev/null || echo none)-$(git rev-parse "HEAD:scripts/rag-index.mjs" 2>/dev/null || echo none)"
+# 迁移/索引镜像（builder 目标）只在迁移目录或索引相关代码变化时重建，否则复用现有镜像
+TOOLS_HASH="$(git rev-parse "HEAD:prisma/migrations" 2>/dev/null || echo none)-$(git rev-parse "HEAD:scripts" 2>/dev/null || echo none)-$(git rev-parse "HEAD:lib/rag" 2>/dev/null || echo none)"
 PREV_TOOLS_HASH="$(cat .tools-image-hash 2>/dev/null || echo none)"
 if [ "$TOOLS_HASH" != "$PREV_TOOLS_HASH" ] || ! docker image inspect love-coach-migrate:latest >/dev/null 2>&1; then
   echo "迁移/索引镜像需要重建（迁移或索引脚本有变化）"
