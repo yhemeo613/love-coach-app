@@ -80,13 +80,30 @@ else
 fi
 
 hr "4/8 构建镜像"
-# 记录当前版本用于回滚
+# 回滚点：保存当前版本
 if docker image inspect love-coach:latest >/dev/null 2>&1; then
   docker tag love-coach:latest love-coach:previous
   echo "已保存上一版本为 love-coach:previous"
 fi
-docker compose build app migrate rag-index 2>&1 | tail -20
+
+if [ "${APP_IMAGE_PREBUILT:-0}" = "1" ]; then
+  echo "应用镜像由本机推送（跳过服务器构建，Next.js 在 2 核机上构建要 8-10 分钟）"
+else
+  docker compose build app 2>&1 | tail -20
+fi
 docker tag love-coach:latest "love-coach:sha-$SHA" 2>/dev/null || true
+
+# 迁移/索引镜像（builder 目标）只在迁移目录或索引脚本变化时重建，否则复用现有镜像
+TOOLS_HASH="$(git rev-parse "HEAD:prisma/migrations" 2>/dev/null || echo none)-$(git rev-parse "HEAD:scripts/rag-index.mjs" 2>/dev/null || echo none)"
+PREV_TOOLS_HASH="$(cat .tools-image-hash 2>/dev/null || echo none)"
+if [ "$TOOLS_HASH" != "$PREV_TOOLS_HASH" ] || ! docker image inspect love-coach-migrate:latest >/dev/null 2>&1; then
+  echo "迁移/索引镜像需要重建（迁移或索引脚本有变化）"
+  docker compose build migrate rag-index 2>&1 | tail -12
+  echo "$TOOLS_HASH" > .tools-image-hash
+else
+  echo "迁移/索引镜像无变化，跳过重建（省约 8 分钟）"
+fi
+
 echo "--- 镜像清单 ---"
 docker images --format "{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}" \
   | grep -E "love-coach|pgvector|redis" | head -8
