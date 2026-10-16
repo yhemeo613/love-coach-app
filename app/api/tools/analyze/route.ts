@@ -84,11 +84,30 @@ export async function POST(req: Request) {
       system: SYSTEM,
       prompt: `可用阶段代号：${sceneList}\n\n聊天记录如下（用户与对方的对话）：\n"""\n${transcript}\n"""\n\n请输出 JSON。`,
       temperature: 0.3,
-      maxOutputTokens: 1600,
+      // 结构化报告 + 长聊天记录时输出较长：默认 8K（模型上限 384K），避免 JSON 被截断
+      maxOutputTokens: Number(process.env.TOOLS_MAX_TOKENS || 8192),
     });
 
     const raw = result.text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "");
-    const parsed = ReportSchema.safeParse(JSON.parse(raw));
+
+    // 解析必须自带保护：输出被长度上限截断时 JSON 不完整，
+    // 直接 JSON.parse 会抛出「Unexpected end of JSON input」并原样透传给前端
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch {
+      const truncated = result.finishReason === "length" || raw.length === 0;
+      return Response.json(
+        {
+          error: truncated
+            ? "模型输出被长度上限截断（长聊天记录时常见）。请缩短聊天记录后重试，或换用 V4 Pro 模型。"
+            : "模型没有返回可解析的 JSON。请重试，或换用 V4 Pro 模型。",
+          detail: raw.slice(0, 400),
+        },
+        { status: 502 },
+      );
+    }
+    const parsed = ReportSchema.safeParse(parsedJson);
 
     if (!parsed.success) {
       return Response.json(
