@@ -15,5 +15,8 @@ export default defineConfig({
   },
   datasource: {
     url: process.env.DATABASE_URL ?? "",
+    // 仅 `prisma migrate diff`（迁移与 schema 漂移检查）需要；
+    // 本地/CI 起一个临时 pgvector 库即可，通过环境变量注入
+    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL || undefined,
   },
 });

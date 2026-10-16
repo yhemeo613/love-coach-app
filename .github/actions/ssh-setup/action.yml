@@ -33,9 +33,30 @@ runs:
           echo "  Port ${{ inputs.port }}"
           echo "  IdentityFile ~/.ssh/id_deploy"
           echo "  IdentitiesOnly yes"
-          echo "  ConnectTimeout 15"
+          echo "  ConnectTimeout 20"
+          echo "  ConnectionAttempts 3"
           echo "  ServerAliveInterval 30"
           echo "  ServerAliveCountMax 20"
+          # GitHub runner 上的 OpenSSH 客户端默认只提议 sk-ssh-ed25519@openssh.com
+          # 这类 FIDO 主机密钥算法，与常规 sshd 协商失败；这里显式声明标准算法
+          echo "  HostKeyAlgorithms +ssh-ed25519,rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp256"
+          echo "  PubkeyAcceptedAlgorithms +ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
         } > ~/.ssh/config
         chmod 600 ~/.ssh/config
+
+        # GitHub 出口到国内服务器的 SSH 偶发在 banner 交换阶段超时，
+        # 这里带退避重试，避免一次抖动让整条流水线失败
+        ok=""
+        for i in $(seq 1 6); do
+          if ssh -o ConnectTimeout=20 deploy-target 'true' >/dev/null 2>&1; then
+            ok=1
+            break
+          fi
+          echo "第 ${i}/6 次连接失败（链路抖动），15 秒后重试…"
+          sleep 15
+        done
+        if [ -z "$ok" ]; then
+          echo "::error::SSH 连接失败：请检查服务器安全组是否放行 ${{ inputs.port }} 端口，以及 sshd 是否运行"
+          exit 1
+        fi
         ssh deploy-target 'echo "SSH 连通: $(hostname) | $(date -Is)"'

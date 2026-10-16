@@ -85,11 +85,14 @@ jobs:
         run: npm ci
 
       - name: schema 与迁移比对（有漂移即失败）
+        env:
+          # Prisma 7：shadow 库地址写在 prisma.config.ts 的 datasource.shadowDatabaseUrl，
+          # 由环境变量注入（不再是命令行参数）
+          SHADOW_DATABASE_URL: postgresql://shadow:shadow@127.0.0.1:5432/shadow
         run: |
           npx prisma migrate diff \
             --from-migrations ./prisma/migrations \
-            --to-schema-datamodel ./prisma/schema.prisma \
-            --shadow-database-url "postgresql://shadow:shadow@127.0.0.1:5432/shadow" \
+            --to-schema ./prisma/schema.prisma \
             --exit-code \
           && echo "schema 与迁移一致"
 
